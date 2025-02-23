@@ -62,30 +62,22 @@ protected:
     /// \name kOmega functions
     //@{
     //- Return the effective diffusivity for k
-        tmp<volScalarField> DkEff() const
-        {
-            return tmp<volScalarField>
-            (
-                new volScalarField
-                (
-                    "DkEff",
-                    alphaK_*this->nut_ + this->nu()
-                )
-            );
-        }
+    tmp<volScalarField> DkEff() const
+    {
+        return tmp<volScalarField>(
+            new volScalarField(
+                "DkEff",
+                alphaK_ * this->nut_ + this->nu()));
+    }
 
-        //- Return the effective diffusivity for omega
-        tmp<volScalarField> DomegaEff() const
-        {
-            return tmp<volScalarField>
-            (
-                new volScalarField
-                (
-                    "DomegaEff",
-                    alphaOmega_*this->nut_ + this->nu()
-                )
-            );
-        }
+    //- Return the effective diffusivity for omega
+    tmp<volScalarField> DomegaEff() const
+    {
+        return tmp<volScalarField>(
+            new volScalarField(
+                "DomegaEff",
+                alphaOmega_ * this->nut_ + this->nu()));
+    }
     //@}
 
     /// \name Augmented variables for adjoint residuals
@@ -95,6 +87,10 @@ protected:
     volScalarField& k_;
     volScalarField kRes_;
     //@}
+
+    /// we need to make the G field a class variable and register it to the mesh.db
+    /// such that the omegaWallFunction BC can find it
+    autoPtr<volScalarField> GPtr_;
 
     /// beta field for field inversion
     volScalarField betaFIK_;
@@ -165,7 +161,7 @@ public:
         scalarField& diag,
         scalarField& upper,
         scalarField& lower);
-    
+
     /// return the value of the destruction term from the turbulence model
     virtual void getTurbProdOverDestruct(volScalarField& PoD) const;
 

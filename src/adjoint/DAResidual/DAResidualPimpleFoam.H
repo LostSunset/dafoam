@@ -39,6 +39,8 @@ protected:
 
     surfaceScalarField& phi_;
     surfaceScalarField phiRes_;
+
+    autoPtr<volScalarField> TResPtr_;
     //@}
 
     /// fvSource term
@@ -53,8 +55,12 @@ protected:
     /// whether to has fvSource term
     label hasFvSource_ = 0;
 
-    /// whether the hybrid adjoint or time accurate adjoint is active
-    word mode_ = "None";
+    /// whether to include the temperature field
+    label hasTField_ = 0;
+
+    scalar Pr_;
+
+    scalar Prt_;
 
 public:
     TypeName("DAPimpleFoam");
@@ -77,7 +83,7 @@ public:
 
     /// clear the members
     virtual void clear();
-    
+
     /// compute residual
     virtual void calcResiduals(const dictionary& options);
 

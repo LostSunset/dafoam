@@ -28,7 +28,6 @@ class DAFunctionWallHeatFlux
 {
 
 protected:
-
     /// Cp used in incompressible heatFlux calculation
     scalar Cp_ = -9999.0;
 
@@ -42,7 +41,10 @@ protected:
     scalar areaSum_ = -9999.0;
 
     /// if calculating flux per unit area or total, which mode to use
-    word calcMode_;
+    bool calcMode_;
+
+    /// if calculating wallHeatFlux by OpenFOAMs snGrad() or DAFOAM's custom (daCustom) formulation
+    word formMode_;
 
 public:
     TypeName("wallHeatFlux");

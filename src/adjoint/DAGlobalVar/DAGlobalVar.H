@@ -60,6 +60,18 @@ public:
 
     /// the maximal residual for primal   this var will be used in multiple classes
     scalar primalMaxRes = 0.0;
+
+    /// the list of parameters for all the actuator disks
+    HashTable<List<scalar>> actuatorDiskPars;
+
+    /// the list of parameters for all the actuator lines
+    HashTable<List<scalar>> actuatorLinePars;
+
+    /// the list of parameters for all the actuator points
+    HashTable<List<scalar>> actuatorPointPars;
+
+    /// the list of parameters for all the actuator disks
+    HashTable<List<scalar>> heatSourcePars;
 };
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //

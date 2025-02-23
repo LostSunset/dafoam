@@ -41,7 +41,6 @@ protected:
     surfaceScalarField& phi_;
     surfaceScalarField phiRes_;
 
-    autoPtr<volScalarField> TPtr_;
     autoPtr<volScalarField> TResPtr_;
     //@}
 
@@ -60,7 +59,7 @@ protected:
     /// simpleControl object which will be initialized in this class
     simpleControl simple_;
 
-    /// Multiple Reference Frame 
+    /// Multiple Reference Frame
     IOMRFZoneListDF& MRF_;
 
     /// whether to have fvSource term
@@ -94,7 +93,7 @@ public:
 
     /// clear the members
     virtual void clear();
-    
+
     /// compute residual
     virtual void calcResiduals(const dictionary& options);
 

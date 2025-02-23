@@ -105,8 +105,8 @@ DAStateInfoSimpleFoam::DAStateInfoSimpleFoam(
     daModel.correctStateResidualModelCon(stateResConInfo_["pRes"]);
     daModel.correctStateResidualModelCon(stateResConInfo_["phiRes"]);
 
-    hasTField = DAUtility::isFieldReadable(mesh_, "T", "volScalarField");
-    
+    label hasTField = DAUtility::isFieldReadable(mesh_, "T", "volScalarField");
+
     if (hasTField)
     {
         stateInfo_["volScalarStates"].append("T");

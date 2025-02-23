@@ -317,17 +317,25 @@ class DAFoamSolver(ImplicitComponent):
 
             DASolver = self.DASolver
 
+            # set the solver input, including mesh, boundary etc.
+            DASolver.set_solver_input(inputs, self.DVGeo)
+
             # before running the primal, we need to check if the mesh
             # quality is good
             meshOK = DASolver.solver.checkMesh()
 
-            # solve the flow with the current design variable
             # if the mesh is not OK, do not run the primal
-            if meshOK:
-                DASolver.set_solver_input(inputs, self.DVGeo)
-                DASolver()
-            else:
-                DASolver.primalFail = 1
+            if meshOK != 1:
+                raise AnalysisError("Mesh quality error!")
+                return
+
+            # call the primal
+            DASolver()
+
+            # if the primal fails, do not set states and return
+            if DASolver.primalFail != 0:
+                raise AnalysisError("Primal solution failed!")
+                return
 
             # after solving the primal, we need to print its residual info
             if DASolver.getOption("useAD")["mode"] == "forward":
@@ -335,18 +343,9 @@ class DAFoamSolver(ImplicitComponent):
             else:
                 DASolver.solver.calcPrimalResidualStatistics("print")
 
-            # get the objective functions
-            funcs = {}
-            DASolver.evalFunctions(funcs)
-
             # assign the computed flow states to outputs
             states = DASolver.getStates()
             outputs[self.stateName] = states
-
-            # if the primal solution fail, we return analysisError and let the optimizer handle it
-            fail = funcs["fail"]
-            if fail:
-                raise AnalysisError("Primal solution failed!")
 
             # set states
             DASolver.setStates(states)
@@ -1372,6 +1371,9 @@ class DAFoamSolverUnsteady(ExplicitComponent):
         DASolver.solverAD.setTime(endTime, endTimeIndex)
         # now we can read the variables
         DASolver.readStateVars(endTime, deltaT)
+        # if it is dynamic mesh, read the mesh points
+        if DASolver.getOption("dynamicMesh"):
+            DASolver.readDynamicMeshPoints(endTime, deltaT, endTimeIndex, ddtSchemeOrder)
 
         # now we can print the residual for the endTime state
         DASolver.solverAD.calcPrimalResidualStatistics("print")
@@ -1389,6 +1391,9 @@ class DAFoamSolverUnsteady(ExplicitComponent):
             DASolver.solverAD.setTime(endTime, endTimeIndex)
             # now we can read the variables
             DASolver.readStateVars(endTime, deltaT)
+            # if it is dynamic mesh, read the mesh points
+            if DASolver.getOption("dynamicMesh"):
+                DASolver.readDynamicMeshPoints(endTime, deltaT, endTimeIndex, ddtSchemeOrder)
             # calc the preconditioner mat for endTime
             if self.comm.rank == 0:
                 print("Pre-Computing preconditiner mat for t = %f" % endTime)
@@ -1396,7 +1401,7 @@ class DAFoamSolverUnsteady(ExplicitComponent):
             dRdWTPC1 = PETSc.Mat().create(PETSc.COMM_WORLD)
             DASolver.solver.calcdRdWT(1, dRdWTPC1)
             # always update the PC mat values using OpenFOAM's fvMatrix
-            DASolver.solver.calcPCMatWithFvMatrix(dRdWTPC1)
+            # DASolver.solver.calcPCMatWithFvMatrix(dRdWTPC1)
             self.dRdWTPC[str(endTime)] = dRdWTPC1
 
             # if we define some extra PCMat in PCMatPrecomputeInterval, calculate them here
@@ -1411,11 +1416,14 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                     DASolver.solverAD.setTime(t, timeIndex)
                     # now we can read the variables
                     DASolver.readStateVars(t, deltaT)
+                    # if it is dynamic mesh, read the mesh points
+                    if DASolver.getOption("dynamicMesh"):
+                        DASolver.readDynamicMeshPoints(t, deltaT, timeIndex, ddtSchemeOrder)
                     # calc the preconditioner mat
                     dRdWTPC1 = PETSc.Mat().create(PETSc.COMM_WORLD)
                     DASolver.solver.calcdRdWT(1, dRdWTPC1)
                     # always update the PC mat values using OpenFOAM's fvMatrix
-                    DASolver.solver.calcPCMatWithFvMatrix(dRdWTPC1)
+                    # DASolver.solver.calcPCMatWithFvMatrix(dRdWTPC1)
                     self.dRdWTPC[str(t)] = dRdWTPC1
 
         # Initialize the KSP object using the PCMat from the endTime
@@ -1480,6 +1488,9 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 # now we can read the variables
                 # read the state, state.oldTime, etc and update self.wVec for this time instance
                 DASolver.readStateVars(timeVal, deltaT)
+                # if it is dynamic mesh, read the mesh points
+                if DASolver.getOption("dynamicMesh"):
+                    DASolver.readDynamicMeshPoints(timeVal, deltaT, n, ddtSchemeOrder)
 
                 # calculate dFdW scaling, if time index is within the unsteady objective function
                 # index range, prescribed in unsteadyAdjointDict, we calculate dFdW

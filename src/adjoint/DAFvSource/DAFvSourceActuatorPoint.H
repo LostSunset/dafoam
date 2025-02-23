@@ -13,6 +13,7 @@
 
 #include "DAFvSource.H"
 #include "addToRunTimeSelectionTable.H"
+#include "DAGlobalVar.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -28,8 +29,7 @@ class DAFvSourceActuatorPoint
 {
 
 protected:
-
-    /// print interval 
+    /// print interval
     label printIntervalUnsteady_;
 
 public:
@@ -51,6 +51,9 @@ public:
 
     /// compute the FvSource term
     virtual void calcFvSource(volVectorField& fvSource);
+
+    /// Initialize the values for all types of fvSource in DAGlobalVar, including actuatorDiskPars, heatSourcePars, etc
+    virtual void initFvSourcePars();
 };
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
