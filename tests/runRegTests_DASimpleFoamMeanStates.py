@@ -13,37 +13,54 @@ from mphys.multipoint import Multipoint
 from dafoam.mphys import DAFoamBuilder, OptFuncs
 from mphys.scenario_aerodynamic import ScenarioAerodynamic
 from pygeo.mphys import OM_DVGEOCOMP
+from pygeo import geo_utils
 
 gcomm = MPI.COMM_WORLD
 
-os.chdir("./reg_test_files-main/PlateHoleV4")
+os.chdir("./reg_test_files-main/UBendDuct")
 if gcomm.rank == 0:
-    os.system("rm -rf processor*")
+    os.system("rm -rf 0 processor* *.bin")
+    os.system("cp -r 0.incompressible 0")
+    os.system("cp -r system.transonic system")
+    os.system("cp -r constant/turbulenceProperties.sa constant/turbulenceProperties")
+    replace_text_in_file("system/fvSchemes", "meshWave;", "meshWaveFrozen;")
+
+# aero setup
+U0 = 10.0
+p0 = 0.0
+T0 = 300.0
+nuTilda0 = 1.0e-4
 
 daOptions = {
-    "designSurfaces": ["hole"],
-    "solverName": "DASolidDisplacementFoam",
-    "primalMinResTol": 1e-10,
-    "primalMinResTolDiff": 1e10,
-    "maxCorrectBCCalls": 20,
+    "designSurfaces": ["ubend"],
+    "solverName": "DASimpleFoam",
+    "primalMinResTol": 1.0e-11,
+    "primalMinResTolDiff": 1e12,
+    "useMeanStates": True,
+    "primalBC": {
+        "U0": {"variable": "U", "patches": ["inlet"], "value": [U0, 0.0, 0.0]},
+        "T0": {"variable": "T", "patches": ["inlet"], "value": [T0]},
+        "p0": {"variable": "p", "patches": ["outlet"], "value": [p0]},
+        "nuTilda0": {"variable": "nuTilda", "patches": ["inlet"], "value": [nuTilda0]},
+        "useWallFunction": True,
+    },
     "function": {
-        "VMS": {
-            "type": "vonMisesStressKS",
-            "source": "allCells",
+        "TP": {
+            "type": "totalPressure",
+            "source": "patchToFace",
+            "patches": ["outlet"],
             "scale": 1.0,
-            "coeffKS": 2.0e-3,
         },
-        "M": {
-            "type": "variableVolSum",
-            "source": "allCells",
-            "varName": "solid:rho",
-            "varType": "scalar",
-            "component": 0,
+        "HFX": {
+            "type": "wallHeatFlux",
+            "source": "patchToFace",
+            "patches": ["ubend"],
             "scale": 1.0,
         },
     },
-    "normalizeStates": {"D": 1.0e-7},
-    "adjEqnOption": {"gmresRelTol": 1.0e-12, "gmresAbsTol": 1.0e-12, "pcFillLevel": 1, "jacMatReOrdering": "rcm"},
+    "adjEqnOption": {"gmresRelTol": 1.0e-10, "pcFillLevel": 1, "jacMatReOrdering": "natural"},
+    "adjStateOrdering": "cell",
+    "normalizeStates": {"U": U0, "p": U0 * U0 / 2.0, "phi": 1.0, "T": T0, "nuTilda": 1e-3},
     "inputInfo": {
         "aero_vol_coords": {"type": "volCoord", "components": ["solver", "function"]},
     },
@@ -53,7 +70,7 @@ meshOptions = {
     "gridFile": os.getcwd(),
     "fileType": "OpenFOAM",
     # point and normal for the symmetry plane
-    "symmetryPlanes": [[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], [[0.0, 0.0, 0.1], [0.0, 0.0, 1.0]]],
+    "symmetryPlanes": [],
 }
 
 
@@ -73,7 +90,7 @@ class Top(Multipoint):
         self.add_subsystem("mesh", dafoam_builder.get_mesh_coordinate_subsystem())
 
         # add the geometry component, we dont need a builder because we do it here.
-        self.add_subsystem("geometry", OM_DVGEOCOMP(file="FFD/plateFFD.xyz", type="ffd"))
+        self.add_subsystem("geometry", OM_DVGEOCOMP(file="FFD/UBendDuctFFD.xyz", type="ffd"))
 
         self.mphys_add_scenario("cruise", ScenarioAerodynamic(aero_builder=dafoam_builder))
 
@@ -88,25 +105,18 @@ class Top(Multipoint):
         # add pointset
         self.geometry.nom_add_discipline_coords("aero", points)
 
-        # geometry setup
-
         pts = self.geometry.DVGeo.getLocalIndex(0)
-        dir_y = np.array([0.0, 1.0, 0.0])
-        shapes = []
-        shapes.append({pts[1, 0, 0]: dir_y, pts[1, 0, 1]: dir_y})
-        self.geometry.nom_addShapeFunctionDV(dvName="shape", shapes=shapes)
+        indexList = pts[8, 1, 2].flatten()
+        PS = geo_utils.PointSelect("list", indexList)
+        nShapes = self.geometry.nom_addLocalDV(dvName="shape", pointSelect=PS)
 
         # add the design variables to the dvs component's output
-        self.dvs.add_output("shape", val=np.zeros(1))
+        self.dvs.add_output("shape", val=np.zeros(1) * nShapes)
         # manually connect the dvs output to the geometry and cruise
         self.connect("shape", "geometry.shape")
 
         # define the design variables to the top level
         self.add_design_var("shape", lower=-10.0, upper=10.0, scaler=1.0)
-
-        # add constraints and the objective
-        self.add_objective("cruise.aero_post.VMS", scaler=1.0)
-        self.add_constraint("cruise.aero_post.M", scaler=1.0, equals=1.0)
 
 
 prob = om.Problem()
@@ -120,7 +130,7 @@ om.n2(prob, show_browser=False, outfile="mphys_aero.html")
 # verify the total derivatives against the finite-difference
 prob.run_model()
 results = prob.check_totals(
-    of=["cruise.aero_post.VMS", "cruise.aero_post.M"],
+    of=["cruise.aero_post.TP", "cruise.aero_post.HFX"],
     wrt=["shape"],
     compact_print=True,
     step=1e-3,
@@ -128,16 +138,17 @@ results = prob.check_totals(
     step_calc="abs",
 )
 
+
 if gcomm.rank == 0:
     funcDict = {}
-    funcDict["VMS"] = prob.get_val("cruise.aero_post.VMS")
-    funcDict["M"] = prob.get_val("cruise.aero_post.M")
+    funcDict["HFX"] = prob.get_val("cruise.aero_post.HFX")
+    funcDict["TP"] = prob.get_val("cruise.aero_post.TP")
     derivDict = {}
-    derivDict["VMS"] = {}
-    derivDict["VMS"]["shape-Adjoint"] = results[("cruise.aero_post.VMS", "shape")]["J_fwd"][0]
-    derivDict["VMS"]["shape-FD"] = results[("cruise.aero_post.VMS", "shape")]["J_fd"][0]
-    derivDict["M"] = {}
-    derivDict["M"]["shape-Adjoint"] = results[("cruise.aero_post.M", "shape")]["J_fwd"][0]
-    derivDict["M"]["shape-FD"] = results[("cruise.aero_post.M", "shape")]["J_fd"][0]
+    derivDict["HFX"] = {}
+    derivDict["HFX"]["shape-Adjoint"] = results[("cruise.aero_post.HFX", "shape")]["J_fwd"][0]
+    derivDict["HFX"]["shape-FD"] = results[("cruise.aero_post.HFX", "shape")]["J_fd"][0]
+    derivDict["TP"] = {}
+    derivDict["TP"]["shape-Adjoint"] = results[("cruise.aero_post.TP", "shape")]["J_fwd"][0]
+    derivDict["TP"]["shape-FD"] = results[("cruise.aero_post.TP", "shape")]["J_fd"][0]
     reg_write_dict(funcDict, 1e-10, 1e-12)
     reg_write_dict(derivDict, 1e-8, 1e-12)
