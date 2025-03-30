@@ -492,8 +492,8 @@ class DAFoamSolver(ImplicitComponent):
 
                         # print the solution counter
                         if self.comm.rank == 0:
-                            print("Driver total derivatives for iteration: %d" % self.solution_counter)
-                            print("---------------------------------------------")
+                            print("Driver total derivatives for iteration: %d" % self.solution_counter, flush=True)
+                            print("---------------------------------------------", flush=True)
                         self.solution_counter += 1
 
                     # compute the preconditioner matrix for the adjoint linear equation solution
@@ -537,8 +537,8 @@ class DAFoamSolver(ImplicitComponent):
                     # DASolver.writeDeformedFFDs(self.solution_counter)
                     # print the solution counter
                     if self.comm.rank == 0:
-                        print("Driver total derivatives for iteration: %d" % self.solution_counter)
-                        print("---------------------------------------------")
+                        print("Driver total derivatives for iteration: %d" % self.solution_counter, flush=True)
+                        print("---------------------------------------------", flush=True)
                     self.solution_counter += 1
                 # solve the adjoint equation using the fixed-point adjoint approach
                 fail = DASolver.solverAD.runFPAdj(dFdW, self.psi)
@@ -1038,10 +1038,10 @@ class DAFoamForces(ExplicitComponent):
         fZTot = self.comm.allreduce(fZSum, op=MPI.SUM)
 
         if self.comm.rank == 0:
-            print("Total force:")
-            print("Fx = %f" % fXTot)
-            print("Fy = %f" % fYTot)
-            print("Fz = %f" % fZTot)
+            print("Total force:", flush=True)
+            print("Fx = %f" % fXTot, flush=True)
+            print("Fy = %f" % fYTot, flush=True)
+            print("Fz = %f" % fZTot, flush=True)
 
     def compute_jacvec_product(self, inputs, d_inputs, d_outputs, mode):
 
@@ -1179,15 +1179,15 @@ class OptFuncs(object):
             norm = np.linalg.norm(res / targets)
 
             if self.comm.rank == 0:
-                print("FindFeasibleDesign Iter: ", n)
-                print("DesignVars: ", dv0)
-                print("Constraints: ", con0)
-                print("Residual Norm: ", norm)
+                print("FindFeasibleDesign Iter: ", n, flush=True)
+                print("DesignVars: ", dv0, flush=True)
+                print("Constraints: ", con0, flush=True)
+                print("Residual Norm: ", norm, flush=True)
 
             # break the loop if residual is already smaller than the tolerance
             if norm < tol:
                 if self.comm.rank == 0:
-                    print("FindFeasibleDesign Converged! ")
+                    print("FindFeasibleDesign Converged! ", flush=True)
                 break
 
             # perturb design variables and compute the Jacobian matrix
@@ -1295,9 +1295,21 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 inputDistributed = DASolver.solver.getInputDistributed(inputName, inputType)
                 self.add_input(inputName, distributed=inputDistributed, shape=inputSize)
 
+        # here we define a set of unsteady component output, they can be a linear combination
+        # of the functions defined in DAOption->function
+        self.unsteadyCompOutput = DASolver.getOption("unsteadyCompOutput")
+        if len(self.unsteadyCompOutput) == 0:
+            raise AnalysisError("unsteadyCompOutput is not defined for unsteady cases")
+
         functions = DASolver.getOption("function")
-        for functionName in list(functions.keys()):
-            self.add_output(functionName, distributed=0, shape=1)
+        for outputName in list(self.unsteadyCompOutput.keys()):
+            # add the output
+            self.add_output(outputName, distributed=0, shape=1)
+            # also verify if the function names defined in the unsteadyCompOutput subdict
+            # is found in DAOption->function
+            for funcName in self.unsteadyCompOutput[outputName]:
+                if funcName not in functions:
+                    raise AnalysisError("%f is not found in DAOption-function" % funcName)
 
     def add_dvgeo(self, DVGeo):
         self.DVGeo = DVGeo
@@ -1338,8 +1350,11 @@ class DAFoamSolverUnsteady(ExplicitComponent):
             # now we can print the residual for the endTime state
             DASolver.solver.calcPrimalResidualStatistics("print")
 
-            for funcName in list(outputs.keys()):
-                outputs[funcName] = funcs[funcName]
+            for outputName in list(self.unsteadyCompOutput.keys()):
+                outputs[outputName] = 0.0
+                # add all the function values for this output
+                for funcName in self.unsteadyCompOutput[outputName]:
+                    outputs[outputName] += funcs[funcName]
 
     def compute_jacvec_product(self, inputs, d_inputs, d_outputs, mode):
         if mode == "fwd":
@@ -1406,7 +1421,7 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 DASolver.readDynamicMeshPoints(endTime, deltaT, endTimeIndex, ddtSchemeOrder)
             # calc the preconditioner mat for endTime
             if self.comm.rank == 0:
-                print("Pre-Computing preconditiner mat for t = %f" % endTime)
+                print("Pre-Computing preconditiner mat for t = %f" % endTime, flush=True)
 
             dRdWTPC1 = PETSc.Mat().create(PETSc.COMM_WORLD)
             DASolver.solver.calcdRdWT(1, dRdWTPC1)
@@ -1420,7 +1435,7 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 if timeIndex % PCMatPrecomputeInterval == 0:
                     t = timeIndex * deltaT
                     if self.comm.rank == 0:
-                        print("Pre-Computing preconditiner mat for t = %f" % t)
+                        print("Pre-Computing preconditiner mat for t = %f" % t, flush=True)
                     # read the latest solution
                     DASolver.solver.setTime(t, timeIndex)
                     DASolver.solverAD.setTime(t, timeIndex)
@@ -1459,16 +1474,18 @@ class DAFoamSolverUnsteady(ExplicitComponent):
         dRdW00TPsiBuffer = np.zeros(localAdjSize)
         dFdWArray = np.zeros(localAdjSize)
         psiArray = np.zeros(localAdjSize)
+        tempdFdWArray = np.zeros(localAdjSize)
 
         # loop over all function, calculate dFdW, and solve the adjoint
-        for functionName in list(d_outputs.keys()):
+        # for functionName in list(d_outputs.keys()):
+        for outputName in list(self.unsteadyCompOutput.keys()):
 
             # we need to zero the total derivative for each function
             totals = {}
             for inputName in list(inputs.keys()):
                 totals[inputName] = np.zeros_like(inputs[inputName])
 
-            seed = d_outputs[functionName]
+            seed = d_outputs[outputName]
 
             # if the seed is zero, do not compute the adjoint and pass to
             # the next funnction
@@ -1479,7 +1496,6 @@ class DAFoamSolverUnsteady(ExplicitComponent):
             dRdW0TPsi[:] = 0.0
             dRdW00TPsi[:] = 0.0
             dRdW00TPsiBuffer[:] = 0.0
-            dFdWArray[:] = 0.0
             dFdW.zeroEntries()
 
             # loop over all time steps and solve the adjoint and accumulate the totals
@@ -1488,7 +1504,7 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 timeVal = n * deltaT
 
                 if self.comm.rank == 0:
-                    print("---- Solving unsteady adjoint for %s. t = %f ----" % (functionName, timeVal))
+                    print("---- Solving unsteady adjoint for %s. t = %f ----" % (outputName, timeVal), flush=True)
 
                 # set the time value and index in the OpenFOAM layer. Note: this is critical
                 # because if timeIndex < 2, OpenFOAM will not use the oldTime.oldTime for 2nd
@@ -1502,25 +1518,33 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 if DASolver.getOption("dynamicMesh")["active"]:
                     DASolver.readDynamicMeshPoints(timeVal, deltaT, n, ddtSchemeOrder)
 
-                # calculate dFdW scaling, if time index is within the unsteady objective function
+                # calculate dFd? scaling, if time index is within the unsteady objective function
                 # index range, prescribed in unsteadyAdjointDict, we calculate dFdW
                 # otherwise, we use dFdW=0 because the unsteady obj does not depend
-                # on the state at this time index
-                dFScaling = DASolver.solver.getdFScaling(functionName, n - 1)
+                # on the state at this time index.
+                # NOTE: we just use the first function in the output for dFScaling and
+                # assume all the functions to have the same timeOp for this output
+                firstFunctionName = self.unsteadyCompOutput[outputName][0]
+                dFScaling = DASolver.solver.getdFScaling(firstFunctionName, n - 1)
 
-                # calculate dFdW
-                jacInput = DASolver.getStates()
-                DASolver.solverAD.calcJacTVecProduct(
-                    "states",
-                    "stateVar",
-                    jacInput,
-                    functionName,
-                    "function",
-                    seed,
-                    dFdWArray,
-                )
+                # loop over all function for this output, compute their dFdW, and add them up to
+                # get the dFdW for this output
+                dFdWArray[:] = 0.0
+                for functionName in self.unsteadyCompOutput[outputName]:
 
-                dFdWArray = dFdWArray * dFScaling
+                    # calculate dFdW
+                    jacInput = DASolver.getStates()
+                    DASolver.solverAD.calcJacTVecProduct(
+                        "states",
+                        "stateVar",
+                        jacInput,
+                        functionName,
+                        "function",
+                        seed,
+                        tempdFdWArray,  # NOTE: we just use tempdFdWArray to hold a temp dFdW for this function
+                    )
+
+                    dFdWArray += tempdFdWArray * dFScaling
 
                 # do dFdW - dRdW0TPsi - dRdW00TPsi
                 if ddtSchemeOrder == 1:
@@ -1535,13 +1559,13 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                 # check if we need to update the PC Mat vals or use the pre-computed PC matrix
                 if str(timeVal) in list(self.dRdWTPC.keys()):
                     if self.comm.rank == 0:
-                        print("Using pre-computed KSP PC mat for %f" % timeVal)
+                        print("Using pre-computed KSP PC mat for %f" % timeVal, flush=True)
                     PCMat = self.dRdWTPC[str(timeVal)]
                     DASolver.solverAD.updateKSPPCMat(PCMat, ksp)
                 if n % PCMatUpdateInterval == 0 and n < endTimeIndex:
                     # udpate part of the PC mat
                     if self.comm.rank == 0:
-                        print("Updating dRdWTPC mat value using OF fvMatrix")
+                        print("Updating dRdWTPC mat value using OF fvMatrix", flush=True)
                     DASolver.solver.calcPCMatWithFvMatrix(PCMat)
 
                 # now solve the adjoint eqn
@@ -1559,17 +1583,22 @@ class DAFoamSolverUnsteady(ExplicitComponent):
                     inputType = inputDict[inputName]["type"]
                     jacInput = inputs[inputName]
                     dFdX = np.zeros_like(jacInput)
-                    DASolver.solverAD.calcJacTVecProduct(
-                        inputName,
-                        inputType,
-                        jacInput,
-                        functionName,
-                        "function",
-                        seed,
-                        dFdX,
-                    )
-                    # we need to scale the dFdX for unsteady adjoint too
-                    dFdX = dFdX * dFScaling
+                    tempdFdX = np.zeros_like(jacInput)
+
+                    # loop over all function for this output, compute their dFdX, and add them up to
+                    # get the dFdX for this output
+                    for functionName in self.unsteadyCompOutput[outputName]:
+                        DASolver.solverAD.calcJacTVecProduct(
+                            inputName,
+                            inputType,
+                            jacInput,
+                            functionName,
+                            "function",
+                            seed,
+                            tempdFdX,
+                        )
+                        # we need to scale the dFdX for unsteady adjoint too
+                        dFdX += tempdFdX * dFScaling
 
                     # calculate dRdX^T * psi
                     dRdXTPsi = np.zeros_like(jacInput)
